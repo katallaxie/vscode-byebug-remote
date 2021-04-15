@@ -11,6 +11,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { ErrPortAttributeMissing } from './error'
 import Byebug from './byebug'
+import { random } from './utils'
 
 const fsAccess = util.promisify(fs.access)
 const fsUnlink = util.promisify(fs.unlink)
@@ -51,7 +52,7 @@ export class ByebugSession extends LoggingDebugSession {
     this.initLaunchAttachRequest(response, args)
   }
 
-  private initLaunchAttachRequest(
+  private async initLaunchAttachRequest(
     response: DebugProtocol.LaunchResponse,
     args: AttachRequestArguments
   ) {
@@ -70,18 +71,26 @@ export class ByebugSession extends LoggingDebugSession {
     logger.setup(this.logLevel, logPath)
 
     args.host = args.host || '127.0.0.1'
-    args.port = args.port || 4711
+    args.port = args.port || random(2000, 50000)
 
     const localPath = args.cwd || '' // should this be the default workfolder?
 
     // here we need to find a path
+    logger.verbose('creating new byebug')
     this.byebug = new Byebug(args, localPath)
+
+    try {
+      await this.byebug.connect(args.port, args.host)
+    } catch (e) {
+      logger.error(e)
+    }
+
     this.byebug.ondata = (data: Buffer) => {
       logger.verbose(data.toString())
-      console.log(data.toString())
     }
 
     this.byebug.onclose = () => {
+      logger.verbose('fully-closed')
       console.log('fully closed')
     }
   }

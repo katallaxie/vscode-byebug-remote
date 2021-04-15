@@ -1,6 +1,7 @@
 import { AttachRequestArguments } from './adapter'
 import * as net from 'net'
 import { normalizePath } from './utils'
+import { logger } from 'vscode-debugadapter/lib/logger'
 
 type LaunchRequestType = 'attach'
 
@@ -34,16 +35,23 @@ export class Byebug {
           readable: true,
           writable: true
         },
-        () => resolve()
+        () => {
+          this.socket?.emit('CONNECTED')
+          resolve()
+        }
       )
-
       this.socket.on('data', this.handleOnData)
-      this.socket.on('error', reject)
+      this.socket.on('ready', () => {
+        logger.verbose('connection is ready')
+      })
+      this.socket.on('error', error => {
+        logger.verbose(error.message)
+      })
     })
   }
 
   public handleOnData(data: Buffer): void {
-    console.log(data)
+    logger.verbose(data.toString())
   }
 }
 

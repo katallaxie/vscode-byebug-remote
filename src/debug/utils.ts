@@ -20,3 +20,7 @@ export function normalizePath(filePath: string) {
   }
   return filePath
 }
+
+export function random(low: number, high: number): number {
+  return Math.floor(Math.random() * (high - low) + low)
+}
