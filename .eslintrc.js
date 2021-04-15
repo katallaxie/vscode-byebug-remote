@@ -6,24 +6,14 @@ module.exports = {
     'plugin:prettier/recommended'
   ],
   plugins: [],
-  overrides: [
-    {
-      files: ['**/*.tsx'],
-      rules: {
-        'react/prop-types': 'off'
-      }
-    }
-  ],
-  settings: {
-
-  },
+  settings: {},
   globals: {
     Atomics: 'readonly',
     SharedArrayBuffer: 'readonly'
   },
   parserOptions: {
     ecmaVersion: 6, // Allows for the parsing of modern ECMAScript features
-    sourceType: 'module', // Allows for the use of imports
+    sourceType: 'module' // Allows for the use of imports
   },
   rules: {}
 }

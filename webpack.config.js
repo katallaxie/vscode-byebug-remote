@@ -1,14 +1,13 @@
 //@ts-check
 
-'use strict';
+'use strict'
 
-const path = require('path');
+const path = require('path')
 
 /**@type {import('webpack').Configuration}*/
 const config = {
   target: 'node', // vscode extensions run in a Node.js-context 📖 -> https://webpack.js.org/configuration/node/
-	mode: 'none', // this leaves the source code as close as possible to the original (when packaging we set this to 'production')
-
+  mode: 'none', // this leaves the source code as close as possible to the original (when packaging we set this to 'production')
   entry: {
     extension: './src/extension.ts',
     adapter: './src/debug/adapter.ts'
@@ -19,7 +18,7 @@ const config = {
     filename: '[name].js',
     libraryTarget: 'commonjs2',
     devtoolModuleFilenameTemplate: '../[resource-path]',
-		sourceMapFilename: '[name].js.map'
+    sourceMapFilename: '[name].js.map'
   },
   devtool: 'nosources-source-map',
   externals: {
@@ -42,5 +41,5 @@ const config = {
       }
     ]
   }
-};
-module.exports = config;
+}
+module.exports = config

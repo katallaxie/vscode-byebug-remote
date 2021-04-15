@@ -42,14 +42,25 @@
   "requiresWorkspaceTrust": "onStart",
   "activationEvents": [
     "workspaceContains:**/*.rb",
-    "onLanguage:rub"
+    "onLanguage:ruby",
+    "onDebugInitialConfigurations",
+    "onDebugResolve:ruby-byebug",
+    "onWebviewPanel:welcomeRubyByebug",
+    "onCommand:vscode-byebug-remote.ruby-byebug.getProgramName",
+    "onCommand:vscode-byebug-remote.ruby-byebug.runEditorContents",
+    "onCommand:vscode-byebug-remote.ruby-byebug.debugEditorContents"
   ],
   "contributes": {
+    "menus": {},
     "commands": [
       {
-        "command": "byebug.connect",
+        "command": "ruby-byebug.connect",
         "title": "Byebug: Connect to remote",
         "description": "Connect to a remote instance of byebug"
+      },
+      {
+        "command": "ruby-byebug.helloWorld",
+        "title": "Hello World"
       }
     ],
     "breakpoints": [
@@ -59,33 +70,74 @@
     ],
     "debuggers": [
       {
-        "type": "ruby",
-        "label": "Ruby",
-        "program": "./dist/debugAdapter.js",
+        "type": "ruby-byebug",
+        "label": "Byebug",
+        "program": "dist/adapter.js",
         "runtime": "node",
         "languages": [
-          "go"
+          {
+            "id": "ruby",
+            "aliases": [
+              "Ruby",
+              "ruby"
+            ]
+          }
         ],
-        "variables": {
-          "pickProcess": "ruby.debug.pickProcess"
-        },
+        "variables": {},
         "configurationAttributes": {
           "attach": {
             "required": [
-              "server"
+              "host",
+              "port"
             ],
             "properties": {
-              "server": {
+              "host": {
                 "type": "string",
-                "description": "Connection address"
+                "description": "Host address for remote debugging.",
+                "default": "127.0.0.1"
+              },
+              "port": {
+                "type": "string",
+                "description": "Port for remote debugging.",
+                "default": "127.0.0.1"
+              },
+              "showDebuggerOutput": {
+                "type": "boolean",
+                "description": "Show output of the debugger in the console.",
+                "default": false
+              },
+              "trace": {
+                "type": "string",
+                "enum": [
+                  "log",
+                  "verbose",
+                  "error"
+                ],
+                "default": "error",
+                "description": "Various levels of logging shown in the debug console. When set to 'log' or 'verbose', the logs will also be written to a file."
               }
             }
           }
         },
+        "initialConfigurations": [
+          {
+            "type": "ruby-byebug",
+            "request": "attach",
+            "name": "Conntect to a remote instance of byebug",
+            "remotePath": "^\"\\${workspaceFolder}\""
+          }
+        ],
         "configurationSnippets": [
           {
             "label": "Byebug: Connect to server",
-            "description": "Connect to a remote instance of byebug"
+            "description": "Connect to a remote instance of byebug",
+            "body": {
+              "name": "${1:Connect to server}",
+              "type": "ruby-byebug",
+              "request": "attach",
+              "port": "12345",
+              "host": "127.0.0.1"
+            }
           }
         ]
       }
@@ -101,8 +153,11 @@
           "scope": "resource"
         }
       }
-    },
-    "menus": {
     }
+  },
+  "dependencies": {
+    "vscode-debugadapter": "^1.46.0",
+    "vscode-debugadapter-testsupport": "^1.46.0",
+    "vscode-debugprotocol": "^1.46.0"
   }
 }
