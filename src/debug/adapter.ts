@@ -80,10 +80,12 @@ export class ByebugSession extends LoggingDebugSession {
     this.byebug = new Byebug(args, localPath)
 
     try {
-      await this.byebug.connect(args.port, args.host)
+      await this.byebug.connect()
     } catch (e) {
       logger.error(e)
     }
+
+    logger.log('connected to byebug')
 
     this.byebug.ondata = (data: Buffer) => {
       logger.verbose(data.toString())

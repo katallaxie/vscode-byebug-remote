@@ -2,15 +2,27 @@ import { AttachRequestArguments } from './adapter'
 import * as net from 'net'
 import { normalizePath } from './utils'
 import { logger } from 'vscode-debugadapter/lib/logger'
+import { DefaultController, Controller } from './controller'
+import {
+  takeUntil,
+  map,
+  skipUntil,
+  take,
+  skipWhile,
+  takeWhile
+} from 'rxjs/operators'
 
 type LaunchRequestType = 'attach'
 
 export class Byebug {
   public program: string
+
   public ondata: (data: Buffer) => void = () => null
   public onend: () => void = () => null
   public onready: () => void = () => null
   public onclose: () => void = () => null
+
+  protected controller: Controller
 
   private request: LaunchRequestType
   private socket: net.Socket | null = null
@@ -18,6 +30,13 @@ export class Byebug {
   constructor(launchArgs: AttachRequestArguments, program: string) {
     this.request = launchArgs.request
     this.program = normalizePath(program)
+
+    this.controller = new DefaultController(launchArgs.host, launchArgs.port)
+    this.controller.events.pipe().subscribe(this.handleControllerEvents)
+  }
+
+  public handleControllerEvents(event: any) {
+    logger.log(JSON.stringify(event))
   }
 
   public close() {
@@ -25,29 +44,15 @@ export class Byebug {
     this.socket = null
   }
 
-  public connect(port: number, host: string): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-      this.socket = net.connect(
-        {
-          family: 6,
-          host,
-          port,
-          readable: true,
-          writable: true
-        },
-        () => {
-          this.socket?.emit('CONNECTED')
-          resolve()
-        }
+  connect = async (): Promise<boolean> => {
+    this.controller.connect()
+
+    return await this.controller.connected
+      .pipe(
+        skipWhile(connected => !connected),
+        take(1)
       )
-      this.socket.on('data', this.handleOnData)
-      this.socket.on('ready', () => {
-        logger.verbose('connection is ready')
-      })
-      this.socket.on('error', error => {
-        logger.verbose(error.message)
-      })
-    })
+      .toPromise()
   }
 
   public handleOnData(data: Buffer): void {
