@@ -1,6 +1,6 @@
 import * as net from 'net'
 import { BehaviorSubject, fromEvent } from 'rxjs'
-import { map, switchMap } from 'rxjs/operators'
+import { map, tap } from 'rxjs/operators'
 import { logger } from 'vscode-debugadapter/lib/logger'
 
 export class ByebugEvent {}
@@ -28,6 +28,11 @@ export class Controller {
     return this.connectionSubject
   }
 
+  private dataSubject = new BehaviorSubject<Buffer | null>(null)
+  get data(): BehaviorSubject<Buffer | null> {
+    return this.dataSubject
+  }
+
   constructor(host = '127.0.0.1', port = 12346) {
     this.host = host
     this.port = port
@@ -37,45 +42,22 @@ export class Controller {
       writable: true
     })
 
-    fromEvent(this.socket, 'connect')
-      .pipe(
-        map(this.handleConnect),
-        switchMap(() => this.eventSubject)
-      )
-      .subscribe()
+    // fromEvent(this.socket, 'error')
+    //   .pipe(
+    //     map(this.handleError),
+    //     switchMap(() => this.eventSubject)
+    //   )
+    //   .subscribe()
 
-    fromEvent(this.socket, 'error')
-      .pipe(
-        map(this.handleError),
-        switchMap(() => this.eventSubject)
-      )
-      .subscribe()
+    fromEvent<boolean>(this.socket, 'close')
+      .pipe(map(() => false))
+      .subscribe(this.connectionSubject)
 
-    fromEvent<void>(this.socket, 'close').subscribe(this.handleClose)
-    fromEvent<void>(this.socket, 'ready').subscribe(this.handleReady)
-    fromEvent<Buffer>(this.socket, 'data').subscribe(this.handleData)
-  }
+    fromEvent<void>(this.socket, 'ready')
+      .pipe(map(() => true))
+      .subscribe(this.connectionSubject)
 
-  private handleError(): ByebugEventError {
-    return new ByebugEventConnected()
-  }
-
-  private handleConnect(): ByebugEventConnected {
-    return new ByebugEventConnected()
-  }
-
-  handleData = (data: Buffer): void => {
-    logger.log(data.toString())
-  }
-
-  handleClose = (): void => {
-    logger.log('closing conenction')
-    this.connectionSubject.next(false)
-    this.socket.destroy()
-  }
-
-  handleReady = (): void => {
-    this.connectionSubject.next(true)
+    fromEvent<Buffer>(this.socket, 'data').subscribe(this.dataSubject)
   }
 
   public connect(): void {
@@ -84,6 +66,10 @@ export class Controller {
       host: this.host,
       port: this.port
     })
+  }
+
+  public disconnect(): void {
+    this.socket.destroy()
   }
 }
 

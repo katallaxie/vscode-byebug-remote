@@ -1,4 +1,5 @@
 import * as path from 'path'
+import { logger } from 'vscode-debugadapter'
 
 export function findPathSeparator(filePath: string) {
   return filePath.includes('/') ? '/' : '\\'
@@ -23,4 +24,20 @@ export function normalizePath(filePath: string) {
 
 export function random(low: number, high: number): number {
   return Math.floor(Math.random() * (high - low) + low)
+}
+
+export function log(...args: any[]) {
+  logger.warn(logArgsToString(args))
+}
+
+export function logError(...args: any[]) {
+  logger.error(logArgsToString(args))
+}
+
+export function logArgsToString(args: any[]): string {
+  return args
+    .map(arg => {
+      return typeof arg === 'string' ? arg : JSON.stringify(arg)
+    })
+    .join(' ')
 }

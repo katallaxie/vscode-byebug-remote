@@ -8,14 +8,26 @@ import {
   map,
   skipUntil,
   take,
+  tap,
   skipWhile,
   takeWhile
 } from 'rxjs/operators'
+import { async, BehaviorSubject } from 'rxjs'
 
 type LaunchRequestType = 'attach'
 
 export class Byebug {
   public program: string
+
+  private connectionSubject = new BehaviorSubject<boolean>(false)
+  get connected(): BehaviorSubject<boolean> {
+    return this.connectionSubject
+  }
+
+  private dataSubject = new BehaviorSubject<Buffer | null>(null)
+  get data(): BehaviorSubject<Buffer | null> {
+    return this.dataSubject
+  }
 
   public ondata: (data: Buffer) => void = () => null
   public onend: () => void = () => null
@@ -32,16 +44,8 @@ export class Byebug {
     this.program = normalizePath(program)
 
     this.controller = new DefaultController(launchArgs.host, launchArgs.port)
-    this.controller.events.pipe().subscribe(this.handleControllerEvents)
-  }
-
-  public handleControllerEvents(event: any) {
-    logger.log(JSON.stringify(event))
-  }
-
-  public close() {
-    if (this.socket !== null) this.socket.destroy()
-    this.socket = null
+    this.controller.connected.subscribe(this.connectionSubject)
+    this.controller.data.subscribe(this.dataSubject)
   }
 
   connect = async (): Promise<boolean> => {
@@ -55,8 +59,8 @@ export class Byebug {
       .toPromise()
   }
 
-  public handleOnData(data: Buffer): void {
-    logger.verbose(data.toString())
+  disconnect = async (): Promise<void> => {
+    return Promise.resolve(this.controller.disconnect())
   }
 }
 
