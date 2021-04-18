@@ -18,7 +18,8 @@ import { EventType, createConnection } from './connection'
 import { from, Observer, Subscription } from 'rxjs'
 import { ByebugConnected } from './events'
 import * as net from 'net'
-import * as readline from 'readline'
+import { fromPrompt } from './prompt'
+import { ByebugHoldInit } from './holdInit'
 
 const fsAccess = util.promisify(fs.access)
 const fsUnlink = util.promisify(fs.unlink)
@@ -126,6 +127,7 @@ export class ByebugSession
       writable: true
     })
 
+    fromPrompt(socket).subscribe(new ByebugHoldInit(this))
     this.byebugSubscription = createConnection(socket).subscribe(this)
   }
 
