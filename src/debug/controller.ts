@@ -1,7 +1,7 @@
 import * as net from 'net'
-import { BehaviorSubject, fromEvent } from 'rxjs'
-import { map, tap } from 'rxjs/operators'
-import { logger } from 'vscode-debugadapter/lib/logger'
+import { BehaviorSubject, from, fromEvent } from 'rxjs'
+import { map } from 'rxjs/operators'
+import { fromSocket } from './connection'
 
 export class ByebugEvent {}
 export class ByebugEventConnected extends ByebugEvent {}
@@ -33,7 +33,7 @@ export class Controller {
     return this.dataSubject
   }
 
-  constructor(host = '127.0.0.1', port = 12346) {
+  constructor(host = '127.0.0.1', port = 12345) {
     this.host = host
     this.port = port
 
@@ -61,11 +61,11 @@ export class Controller {
   }
 
   public connect(): void {
-    this.socket.connect({
-      family: 6,
-      host: this.host,
-      port: this.port
-    })
+    fromSocket(this.socket).subscribe()
+  }
+
+  public send(line: string): void {
+    this.socket.write(`${line}\n`)
   }
 
   public disconnect(): void {

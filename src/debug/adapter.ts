@@ -13,9 +13,11 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { ErrPortAttributeMissing } from './error'
-import Byebug from './byebug'
 import { random, log } from './utils'
 import { filter, skip, take, tap } from 'rxjs/operators'
+import { ByebugConnected, EventType, fromSocket } from './connection'
+import { from, Observer, Subscription } from 'rxjs'
+import * as net from 'net'
 
 const fsAccess = util.promisify(fs.access)
 const fsUnlink = util.promisify(fs.unlink)
@@ -33,9 +35,11 @@ export interface AttachRequestArguments
   cwd?: string
 }
 
-export class ByebugSession extends LoggingDebugSession {
+export class ByebugSession
+  extends LoggingDebugSession
+  implements Observer<EventType> {
   private logLevel: Logger.LogLevel = Logger.LogLevel.Error
-  private byebug: Byebug | null = null
+  private byebugSubscription: Subscription | null = null
 
   public constructor(
     debuggerLinesStartAt1: boolean,
@@ -43,6 +47,26 @@ export class ByebugSession extends LoggingDebugSession {
     readonly fileSystem = fs
   ) {
     super('', debuggerLinesStartAt1, isServer)
+  }
+
+  closed = false
+
+  next(event: EventType) {
+    log(`${event}`)
+
+    if (event instanceof ByebugConnected) {
+      log('Sending InitializedEvent as byebug is connected')
+      this.sendEvent(new InitializedEvent())
+    }
+  }
+
+  error(err: Error) {
+    log('Sending TerminatedEvent as byebug is disconnected')
+    this.sendEvent(new TerminatedEvent())
+  }
+
+  complete() {
+    this.sendEvent(new TerminatedEvent())
   }
 
   protected initializeRequest(
@@ -97,29 +121,13 @@ export class ByebugSession extends LoggingDebugSession {
 
     // here we need to find a path
     log('creating new byebug')
-    this.byebug = new Byebug(args, localPath)
 
-    this.byebug.connected.pipe(skip(1)).subscribe(connected => {
-      if (!connected) {
-        // could be done in the stream
-        log('Sending TerminatedEvent as byebug is disconnected')
-        this.sendEvent(new TerminatedEvent())
-      }
+    const socket = new net.Socket({
+      readable: true,
+      writable: true
     })
 
-    this.byebug.data.pipe(tap(val => logger.log(`${val}`))).subscribe(data => {
-      log('Send an OutputEvent')
-      this.sendEvent(new OutputEvent(data?.toString() || ''))
-    })
-
-    try {
-      await this.byebug.connect()
-    } catch (e) {
-      logger.error(e)
-    }
-
-    this.sendEvent(new InitializedEvent())
-    log('Sending InitializedEvent as byebug is connected')
+    this.byebugSubscription = fromSocket(socket).subscribe(this)
   }
 
   protected async disconnectRequest(
@@ -128,7 +136,7 @@ export class ByebugSession extends LoggingDebugSession {
   ): Promise<void> {
     log('DisconnectRequest')
 
-    if (this.byebug) {
+    if (this.byebugSubscription) {
       await Promise.race([
         this.disconnectedRequestHelper(response, args),
         new Promise<void>(resolve =>
@@ -161,7 +169,7 @@ export class ByebugSession extends LoggingDebugSession {
     // this continue
 
     log('Closing byebug')
-    await this.byebug?.disconnect()
+    await this.byebugSubscription?.unsubscribe()
   }
 
   protected async configurationDoneRequest(
