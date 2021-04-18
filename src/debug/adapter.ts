@@ -5,8 +5,7 @@ import {
   Logger,
   DebugSession,
   InitializedEvent,
-  TerminatedEvent,
-  OutputEvent
+  TerminatedEvent
 } from 'vscode-debugadapter'
 import * as util from 'util'
 import * as fs from 'fs'
@@ -15,9 +14,11 @@ import * as os from 'os'
 import { ErrPortAttributeMissing } from './error'
 import { random, log } from './utils'
 import { filter, skip, take, tap } from 'rxjs/operators'
-import { ByebugConnected, EventType, fromSocket } from './connection'
+import { EventType, createConnection } from './connection'
 import { from, Observer, Subscription } from 'rxjs'
+import { ByebugConnected } from './events'
 import * as net from 'net'
+import * as readline from 'readline'
 
 const fsAccess = util.promisify(fs.access)
 const fsUnlink = util.promisify(fs.unlink)
@@ -51,9 +52,7 @@ export class ByebugSession
 
   closed = false
 
-  next(event: EventType) {
-    log(`${event}`)
-
+  async next(event: EventType) {
     if (event instanceof ByebugConnected) {
       log('Sending InitializedEvent as byebug is connected')
       this.sendEvent(new InitializedEvent())
@@ -127,7 +126,7 @@ export class ByebugSession
       writable: true
     })
 
-    this.byebugSubscription = fromSocket(socket).subscribe(this)
+    this.byebugSubscription = createConnection(socket).subscribe(this)
   }
 
   protected async disconnectRequest(

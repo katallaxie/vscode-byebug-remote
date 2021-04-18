@@ -1,21 +1,28 @@
 import * as net from 'net'
-import { fromEvent, Observable, Observer } from 'rxjs'
+import { fromEvent, Observable } from 'rxjs'
+import { ByebugConnected } from './events'
 
 export type Command = 'help' | 'step' | 'restart' | 'next' | 'continue'
 export type EventType = ByebugConnected
-export class ByebugConnected {}
-export class ByebugData {}
 
-export function fromSocket(
+export function createConnection(
   socket: net.Socket,
+  onEntry = true,
   opts: net.SocketConnectOpts = { host: '127.0.0.1', port: 12345, family: 6 }
 ): Observable<EventType> {
   const socketObservable = new Observable<EventType>(subscribe => {
     const source = socket
+    let chunks: Buffer[] = []
 
     const dataSubscription = fromEvent<Buffer>(source, 'data').subscribe(
       data => {
-        subscribe.next(data.toString())
+        chunks.push(data)
+
+        if (data.indexOf('PROMPT') === 0) {
+          subscribe.next(Buffer.concat(chunks))
+
+          chunks = []
+        }
       }
     )
 
@@ -44,13 +51,3 @@ export function fromSocket(
 
   return socketObservable
 }
-
-// export abstract class Connection implements Observer<EventType> {
-//   closed = false
-
-//   next(value: EventType) {}
-
-//   error(err: Error) {}
-
-//   complete() {}
-// }
