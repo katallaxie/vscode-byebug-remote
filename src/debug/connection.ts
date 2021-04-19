@@ -7,7 +7,6 @@ export type EventType = ByebugConnected
 
 export function createConnection(
   socket: net.Socket,
-  onEntry = true,
   opts: net.SocketConnectOpts = { host: '127.0.0.1', port: 12345, family: 6 }
 ): Observable<EventType> {
   const socketObservable = new Observable<EventType>(subscribe => {

@@ -11,15 +11,16 @@ import * as util from 'util'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { ErrPortAttributeMissing } from './error'
+import { ErrPortAttributeMissing, ErrLaunchRequestNotSupported } from './error'
 import { random, log } from './utils'
 import { filter, skip, take, tap } from 'rxjs/operators'
 import { EventType, createConnection } from './connection'
-import { from, Observer, Subscription } from 'rxjs'
+import { from, Observable, of, Observer, Subscription } from 'rxjs'
 import { ByebugConnected } from './events'
 import * as net from 'net'
 import { fromPrompt } from './prompt'
 import { ByebugHoldInit } from './holdInit'
+import { Client } from './client'
 
 const fsAccess = util.promisify(fs.access)
 const fsUnlink = util.promisify(fs.unlink)
@@ -75,12 +76,24 @@ export class ByebugSession
   ): void {
     log('InitializeRequest')
 
-    response.body!.supportsSetVariable ??= true
-    response.body!.supportsRestartRequest ?? true
-    response.body!.supportsSetVariable = true
+    response.body = {
+      supportsConfigurationDoneRequest: true,
+      supportsEvaluateForHovers: false,
+      supportsConditionalBreakpoints: true,
+      supportsFunctionBreakpoints: true,
+      supportTerminateDebuggee: true
+    }
 
     this.sendResponse(response)
     log('InitializeResponse')
+  }
+
+  protected launchRequest(
+    response: DebugProtocol.LaunchResponse,
+    args: DebugProtocol.LaunchRequestArguments
+  ): void {
+    this.sendErrorResponse(response, 3000, ErrLaunchRequestNotSupported)
+    this.shutdown()
   }
 
   protected attachRequest(
@@ -122,13 +135,26 @@ export class ByebugSession
     // here we need to find a path
     log('creating new byebug')
 
-    const socket = new net.Socket({
-      readable: true,
-      writable: true
-    })
+    // const socket = new net.Socket({
+    //   readable: true,
+    //   writable: true
+    // })
 
-    fromPrompt(socket).subscribe(new ByebugHoldInit(this))
-    this.byebugSubscription = createConnection(socket).subscribe(this)
+    // fromPrompt(socket).subscribe(new ByebugHoldInit(this))
+    // this.byebugSubscription = createConnection(socket).subscribe(this)
+
+    const client = new Client()
+    client.data().subscribe(this)
+
+    try {
+      await client.connect()
+    } catch (error) {
+      this.sendErrorResponse(response, error)
+
+      return
+    }
+
+    this.sendResponse(response)
   }
 
   protected async disconnectRequest(
@@ -177,6 +203,8 @@ export class ByebugSession
     response: DebugProtocol.ConfigurationDoneResponse,
     args: DebugProtocol.ConfigurationDoneArguments
   ) {
+    super.configurationDoneRequest(response, args)
+
     log('ConfigurationDoneRequest')
 
     this.sendResponse(response)
@@ -188,6 +216,24 @@ export class ByebugSession
     args: DebugProtocol.SetBreakpointsArguments
   ) {
     log('SetBreakPointsRequest')
+  }
+
+  protected nextRequest(response: DebugProtocol.NextResponse): void {
+    log('NextRequest')
+
+    log('NextResponse')
+  }
+
+  protected stepInRequest(response: DebugProtocol.StepInResponse): void {
+    log('StepInRequest')
+
+    log('StepInResponse')
+  }
+
+  protected stepOutRequest(response: DebugProtocol.StepOutResponse): void {
+    log('StepOutRequest')
+
+    log('StepOutResponse')
   }
 }
 
