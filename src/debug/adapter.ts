@@ -14,13 +14,13 @@ import * as os from 'os'
 import { ErrPortAttributeMissing, ErrLaunchRequestNotSupported } from './error'
 import { random, log } from './utils'
 import { filter, skip, take, tap } from 'rxjs/operators'
-import { EventType, createConnection } from './connection'
-import { from, Observable, of, Observer, Subscription } from 'rxjs'
-import { ByebugConnected } from './events'
+import { EventType } from './connection'
+import { from, Observable, of, Observer, Subscription, Subject } from 'rxjs'
+import { ByebugConnected, ByebugReceived } from './events'
 import * as net from 'net'
 import { fromPrompt } from './prompt'
 import { ByebugHoldInit } from './holdInit'
-import { Client } from './client'
+import { ByebugObservable } from './client'
 
 const fsAccess = util.promisify(fs.access)
 const fsUnlink = util.promisify(fs.unlink)
@@ -43,6 +43,7 @@ export class ByebugSession
   implements Observer<EventType> {
   private logLevel: Logger.LogLevel = Logger.LogLevel.Error
   private byebugSubscription: Subscription | null = null
+  private connected = new Subject()
 
   public constructor(
     debuggerLinesStartAt1: boolean,
@@ -58,6 +59,12 @@ export class ByebugSession
     if (event instanceof ByebugConnected) {
       log('Sending InitializedEvent as byebug is connected')
       this.sendEvent(new InitializedEvent())
+
+      this.connected.complete()
+    }
+
+    if (event instanceof ByebugReceived) {
+      logger.log(event.toString())
     }
   }
 
@@ -135,19 +142,16 @@ export class ByebugSession
     // here we need to find a path
     log('creating new byebug')
 
-    // const socket = new net.Socket({
-    //   readable: true,
-    //   writable: true
-    // })
+    const c = ByebugObservable.create({
+      host: 'localhost',
+      port: 12345,
+      family: 6
+    })
 
-    // fromPrompt(socket).subscribe(new ByebugHoldInit(this))
-    // this.byebugSubscription = createConnection(socket).subscribe(this)
-
-    const client = new Client()
-    client.data().subscribe(this)
+    c.subscribe(this)
 
     try {
-      await client.connect()
+      await this.connected.toPromise()
     } catch (error) {
       this.sendErrorResponse(response, error)
 
