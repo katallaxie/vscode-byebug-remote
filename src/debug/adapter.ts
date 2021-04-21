@@ -44,6 +44,7 @@ export class ByebugSession
   private logLevel: Logger.LogLevel = Logger.LogLevel.Error
   private byebugSubscription: Subscription | null = null
   private connected = new Subject()
+  private waitForInitPacket = new Subject()
 
   public constructor(
     debuggerLinesStartAt1: boolean,
@@ -63,7 +64,7 @@ export class ByebugSession
       this.connected.complete()
     }
 
-    if (event instanceof ByebugReceived) {
+    if (event instanceof Buffer) {
       logger.log(event.toString())
     }
   }
