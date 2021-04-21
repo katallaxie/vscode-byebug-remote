@@ -5,7 +5,13 @@ import {
   Logger,
   DebugSession,
   InitializedEvent,
-  TerminatedEvent
+  TerminatedEvent,
+  OutputEvent,
+  ThreadEvent,
+  StoppedEvent,
+  BreakpointEvent,
+  Breakpoint,
+  Source
 } from 'vscode-debugadapter'
 import * as util from 'util'
 import * as fs from 'fs'
@@ -21,6 +27,11 @@ import * as net from 'net'
 import { fromPrompt } from './prompt'
 import { ByebugHoldInit } from './holdInit'
 import { ByebugObservable } from './client'
+import {
+  ByebugConnectionEvent,
+  ByebugCreated,
+  ByebugConnection
+} from './events'
 
 const fsAccess = util.promisify(fs.access)
 const fsUnlink = util.promisify(fs.unlink)
@@ -40,11 +51,15 @@ export interface AttachRequestArguments
 
 export class ByebugSession
   extends LoggingDebugSession
-  implements Observer<EventType> {
+  implements Observer<ByebugConnectionEvent> {
   private logLevel: Logger.LogLevel = Logger.LogLevel.Error
+
+  private waitingConnections = new Set<ByebugConnection>()
+  private waitingForInit = new Subject()
+  private waitingForConnect = new Subject<ByebugConnection>()
   private byebugSubscription: Subscription | null = null
-  private connected = new Subject()
-  private waitForInitPacket = new Subject()
+
+  private connections = new Map<number, Observable<ByebugConnectionEvent>>()
 
   public constructor(
     debuggerLinesStartAt1: boolean,
@@ -56,16 +71,50 @@ export class ByebugSession
 
   closed = false
 
-  async next(event: EventType) {
-    if (event instanceof ByebugConnected) {
-      log('Sending InitializedEvent as byebug is connected')
-      this.sendEvent(new InitializedEvent())
+  async next(event: ByebugConnectionEvent) {
+    if (event instanceof ByebugCreated) {
+      log('Sending OutputEvent as byebug is created')
 
-      this.connected.complete()
+      this.sendEvent(new OutputEvent(`new connection ${event.id}`))
     }
 
-    if (event instanceof Buffer) {
-      logger.log(event.toString())
+    if (event instanceof ByebugConnected) {
+      log('Sending InitializedEvent as byebug is connected')
+
+      this.sendEvent(new InitializedEvent())
+
+      this.waitingForConnect.next(event)
+      this.waitingForConnect.complete()
+    }
+
+    if (event instanceof ByebugReceived) {
+      if (event.initial) {
+        log('Sending Initial Prompt')
+
+        this.waitingForInit.next(event)
+        this.waitingForInit.complete()
+
+        this.sendEvent(new StoppedEvent('entry'))
+
+        this.sendEvent(
+          new BreakpointEvent(
+            'new',
+            new Breakpoint(
+              true,
+              59,
+              63,
+              new Source(
+                path.basename(
+                  '/Users/sebastian/src/github/github/app/controllers/dashboard_controller.rb'
+                ),
+                '/Users/sebastian/src/github/github/app/controllers/dashboard_controller.rb'
+              )
+            )
+          )
+        )
+
+        return
+      }
     }
   }
 
@@ -149,16 +198,20 @@ export class ByebugSession
       family: 6
     })
 
-    c.subscribe(this)
+    this.byebugSubscription = c.subscribe(this)
 
     try {
-      await this.connected.toPromise()
+      const { id } = await this.waitingForConnect.toPromise()
+      this.sendEvent(new ThreadEvent('started', id))
+
+      await this.waitingForInit.toPromise()
     } catch (error) {
       this.sendErrorResponse(response, error)
 
       return
     }
 
+    // request other breakpoints from vs code
     this.sendResponse(response)
   }
 
@@ -168,17 +221,15 @@ export class ByebugSession
   ): Promise<void> {
     log('DisconnectRequest')
 
-    if (this.byebugSubscription) {
-      await Promise.race([
-        this.disconnectedRequestHelper(response, args),
-        new Promise<void>(resolve =>
-          setTimeout(() => {
-            log('DisconnectRequestHelper timed out after 5s.')
-            resolve()
-          }, 5_000)
-        )
-      ])
-    }
+    await Promise.race([
+      this.disconnectedRequestHelper(response, args),
+      new Promise<void>(resolve =>
+        setTimeout(() => {
+          log('DisconnectRequestHelper timed out after 5s.')
+          resolve()
+        }, 5_000)
+      )
+    ])
 
     this.shutdownProtocolServer(response, args)
     log('DisconnectResponse')
