@@ -32,6 +32,7 @@ import {
   ByebugCreated,
   ByebugConnection
 } from './events'
+import { Location, SourceBreakpoint, Uri } from 'vscode'
 
 const fsAccess = util.promisify(fs.access)
 const fsUnlink = util.promisify(fs.unlink)
@@ -61,15 +62,38 @@ export class ByebugSession
 
   private connections = new Map<number, Observable<ByebugConnectionEvent>>()
 
-  public constructor(
-    debuggerLinesStartAt1: boolean,
-    isServer = false,
-    readonly fileSystem = fs
-  ) {
-    super('', debuggerLinesStartAt1, isServer)
+  public constructor() {
+    super()
+
+    this.setDebuggerColumnsStartAt1(true)
+    this.setDebuggerLinesStartAt1(true)
+    this.setDebuggerPathFormat('path')
   }
 
-  closed = false
+  /**
+   *
+   * @param response
+   * @param args
+   */
+  protected initializeRequest(
+    response: DebugProtocol.InitializeResponse,
+    args: DebugProtocol.InitializeRequestArguments
+  ): void {
+    log('InitializeRequest')
+
+    response.body = {
+      supportsConfigurationDoneRequest: true,
+      supportsEvaluateForHovers: false,
+      supportsConditionalBreakpoints: false,
+      supportsFunctionBreakpoints: true
+    }
+
+    this.sendResponse(response)
+
+    log('InitializeResponse')
+
+    this.sendEvent(new InitializedEvent())
+  }
 
   async next(event: ByebugConnectionEvent) {
     if (event instanceof ByebugCreated) {
@@ -79,10 +103,6 @@ export class ByebugSession
     }
 
     if (event instanceof ByebugConnected) {
-      log('Sending InitializedEvent as byebug is connected')
-
-      this.sendEvent(new InitializedEvent())
-
       this.waitingForConnect.next(event)
       this.waitingForConnect.complete()
     }
@@ -119,30 +139,12 @@ export class ByebugSession
   }
 
   error(err: Error) {
-    log('Sending TerminatedEvent as byebug is disconnected')
+    log(`Sending TerminatedEvent as byebug is disconnected ${err}`)
     this.sendEvent(new TerminatedEvent())
   }
 
   complete() {
     this.sendEvent(new TerminatedEvent())
-  }
-
-  protected initializeRequest(
-    response: DebugProtocol.InitializeResponse,
-    args: DebugProtocol.InitializeRequestArguments
-  ): void {
-    log('InitializeRequest')
-
-    response.body = {
-      supportsConfigurationDoneRequest: true,
-      supportsEvaluateForHovers: false,
-      supportsConditionalBreakpoints: true,
-      supportsFunctionBreakpoints: true,
-      supportTerminateDebuggee: true
-    }
-
-    this.sendResponse(response)
-    log('InitializeResponse')
   }
 
   protected launchRequest(
@@ -193,7 +195,7 @@ export class ByebugSession
     log('creating new byebug')
 
     const c = ByebugObservable.create({
-      host: 'localhost',
+      host: '127.0.0.1',
       port: 12345,
       family: 6
     })
@@ -210,6 +212,8 @@ export class ByebugSession
 
       return
     }
+
+    log('AttachedResponse')
 
     // request other breakpoints from vs code
     this.sendResponse(response)
@@ -270,8 +274,30 @@ export class ByebugSession
   protected async setBreakPointsRequest(
     response: DebugProtocol.SetBreakpointsResponse,
     args: DebugProtocol.SetBreakpointsArguments
-  ) {
+  ): Promise<void> {
     log('SetBreakPointsRequest')
+
+    // let vscodeBreakpoints: DebugProtocol.Breakpoint[]
+    // if there are no connections yet, we cannot verify any breakpoint
+    const vscodeBreakpoints = args.breakpoints!.map(breakpoint => ({
+      verified: false,
+      line: breakpoint.line
+    }))
+
+    vscodeBreakpoints.push()
+
+    response.body = { breakpoints: vscodeBreakpoints }
+
+    this.sendResponse(response)
+  }
+
+  protected async stackTraceRequest(
+    response: DebugProtocol.StackTraceResponse,
+    args: DebugProtocol.StackTraceArguments
+  ) {
+    log('StackTraceRequest')
+
+    this.sendResponse(response)
   }
 
   protected nextRequest(response: DebugProtocol.NextResponse): void {
