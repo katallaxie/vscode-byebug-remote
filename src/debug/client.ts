@@ -9,34 +9,28 @@ import {
 import * as net from 'net'
 import { logger } from 'vscode-debugadapter/lib/logger'
 
-export interface ByebugCreationMethod {
+export interface ByebugClientMethod {
   (opts: net.SocketConnectOpts): Observable<ByebugConnectionEvent>
+  restart(): void
 }
 
-export class ByebugObservable extends Observable<ByebugConnectionEvent> {
-  private socket: net.Socket = new net.Socket({
-    writable: true,
-    readable: true
-  })
-  private static _connectionCounter = 1
-
+export class ByebugClient extends Observable<ByebugConnectionEvent> {
   public connection: ByebugConnection
 
-  static create: ByebugCreationMethod = (() => {
+  static create: ByebugClientMethod = (() => {
     const create: any = (opts: net.SocketConnectOpts) => {
-      return new ByebugObservable(opts)
+      return new ByebugClient(opts)
     }
 
-    return <ByebugCreationMethod>create
+    return <ByebugClientMethod>create
   })()
 
   constructor(public opts: net.SocketConnectOpts) {
     super()
 
     const socket = new net.Socket({ writable: true, readable: true })
-    const id = ByebugObservable._connectionCounter++
 
-    this.connection = new ByebugConnection(id, socket, opts)
+    this.connection = new ByebugConnection(socket, opts)
   }
 
   _subscribe(subscriber: Subscriber<ByebugConnectionEvent>): TeardownLogic {
@@ -57,12 +51,15 @@ export class ByebugSubscriber extends Subscriber<ByebugConnectionEvent> {
     this.connect()
   }
 
+  public restart(): void {
+    this.connection.socket.write(`restart\n`)
+  }
+
   private connect(): void {
     try {
       this.setupEvents()
 
       const event = new ByebugCreated(
-        this.connection.id,
         this.connection.socket,
         this.connection.opts
       )
@@ -80,11 +77,7 @@ export class ByebugSubscriber extends Subscriber<ByebugConnectionEvent> {
       'ready'
     ).subscribe(() => {
       this.next(
-        new ByebugConnected(
-          this.connection.id,
-          this.connection.socket,
-          this.connection.opts
-        )
+        new ByebugConnected(this.connection.socket, this.connection.opts)
       )
     })
 
@@ -100,7 +93,6 @@ export class ByebugSubscriber extends Subscriber<ByebugConnectionEvent> {
       'close'
     ).subscribe(() => {
       const event = new ByebugConnected(
-        this.connection.id,
         this.connection.socket,
         this.connection.opts
       )
@@ -118,7 +110,6 @@ export class ByebugSubscriber extends Subscriber<ByebugConnectionEvent> {
         logger.log('got prompt')
         // we ended at the prompt, sending the chunks
         const event = new ByebugReceived(
-          this.connection.id,
           this.connection.socket,
           this.connection.opts,
           Buffer.from(Buffer.concat(this.chunks)),

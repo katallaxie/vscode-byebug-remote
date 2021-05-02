@@ -1,11 +1,7 @@
 import * as net from 'net'
 
 export class ByebugConnection {
-  constructor(
-    public id: number,
-    public socket: net.Socket,
-    public opts: net.SocketConnectOpts
-  ) {}
+  constructor(public socket: net.Socket, public opts: net.SocketConnectOpts) {}
 
   public connect(): net.Socket {
     return this.socket.connect(this.opts)
@@ -23,13 +19,12 @@ export class ByebugSend extends ByebugConnection {}
 
 export class ByebugReceived extends ByebugConnection {
   constructor(
-    public id: number,
     public socket: net.Socket,
     public opts: net.SocketConnectOpts,
     public buffer: Buffer,
     public initial: boolean
   ) {
-    super(id, socket, opts)
+    super(socket, opts)
   }
 }
 

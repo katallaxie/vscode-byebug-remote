@@ -7,11 +7,11 @@ import {
   InitializedEvent,
   TerminatedEvent,
   OutputEvent,
-  ThreadEvent,
   StoppedEvent,
   BreakpointEvent,
   Breakpoint,
-  Source
+  Source,
+  Thread
 } from 'vscode-debugadapter'
 import * as util from 'util'
 import * as fs from 'fs'
@@ -26,7 +26,7 @@ import { ByebugConnected, ByebugReceived } from './events'
 import * as net from 'net'
 import { fromPrompt } from './prompt'
 import { ByebugHoldInit } from './holdInit'
-import { ByebugObservable } from './client'
+import { ByebugClient } from './client'
 import {
   ByebugConnectionEvent,
   ByebugCreated,
@@ -55,12 +55,14 @@ export class ByebugSession
   implements Observer<ByebugConnectionEvent> {
   private logLevel: Logger.LogLevel = Logger.LogLevel.Error
 
+  // we don't support multiple threads, so we can use a hardcoded ID for the default thread
+  private static threadID = 1
+
   private waitingConnections = new Set<ByebugConnection>()
   private waitingForInit = new Subject()
   private waitingForConnect = new Subject<ByebugConnection>()
   private byebugSubscription: Subscription | null = null
-
-  private connections = new Map<number, Observable<ByebugConnectionEvent>>()
+  private waitForConfigurationDone = new Subject()
 
   public constructor() {
     super()
@@ -76,8 +78,7 @@ export class ByebugSession
    * @param args
    */
   protected initializeRequest(
-    response: DebugProtocol.InitializeResponse,
-    args: DebugProtocol.InitializeRequestArguments
+    response: DebugProtocol.InitializeResponse
   ): void {
     log('InitializeRequest')
 
@@ -85,7 +86,8 @@ export class ByebugSession
       supportsConfigurationDoneRequest: true,
       supportsEvaluateForHovers: false,
       supportsConditionalBreakpoints: false,
-      supportsFunctionBreakpoints: true
+      supportsFunctionBreakpoints: true,
+      supportsRestartRequest: true
     }
 
     this.sendResponse(response)
@@ -99,7 +101,7 @@ export class ByebugSession
     if (event instanceof ByebugCreated) {
       log('Sending OutputEvent as byebug is created')
 
-      this.sendEvent(new OutputEvent(`new connection ${event.id}`))
+      this.sendEvent(new OutputEvent(`new connection`))
     }
 
     if (event instanceof ByebugConnected) {
@@ -108,30 +110,15 @@ export class ByebugSession
     }
 
     if (event instanceof ByebugReceived) {
+      this.sendEvent(new OutputEvent(event.buffer.toString()))
+
       if (event.initial) {
         log('Sending Initial Prompt')
 
         this.waitingForInit.next(event)
         this.waitingForInit.complete()
 
-        this.sendEvent(new StoppedEvent('entry'))
-
-        this.sendEvent(
-          new BreakpointEvent(
-            'new',
-            new Breakpoint(
-              true,
-              59,
-              63,
-              new Source(
-                path.basename(
-                  '/Users/sebastian/src/github/github/app/controllers/dashboard_controller.rb'
-                ),
-                '/Users/sebastian/src/github/github/app/controllers/dashboard_controller.rb'
-              )
-            )
-          )
-        )
+        // this.sendEvent(new StoppedEvent('entry'))
 
         return
       }
@@ -147,10 +134,7 @@ export class ByebugSession
     this.sendEvent(new TerminatedEvent())
   }
 
-  protected launchRequest(
-    response: DebugProtocol.LaunchResponse,
-    args: DebugProtocol.LaunchRequestArguments
-  ): void {
+  protected launchRequest(response: DebugProtocol.LaunchResponse): void {
     this.sendErrorResponse(response, 3000, ErrLaunchRequestNotSupported)
     this.shutdown()
   }
@@ -191,22 +175,21 @@ export class ByebugSession
 
     const localPath = args.cwd || '' // should this be the default workfolder?
 
+    await this.waitForConfigurationDone.toPromise()
+
     // here we need to find a path
     log('creating new byebug')
 
-    const c = ByebugObservable.create({
-      host: '127.0.0.1',
-      port: 12345,
+    const client = ByebugClient.create({
+      host: args.host,
+      port: args.port,
       family: 6
     })
 
-    this.byebugSubscription = c.subscribe(this)
+    client.subscribe(this)
 
     try {
-      const { id } = await this.waitingForConnect.toPromise()
-      this.sendEvent(new ThreadEvent('started', id))
-
-      await this.waitingForInit.toPromise()
+      await this.waitingForConnect.toPromise()
     } catch (error) {
       this.sendErrorResponse(response, error)
 
@@ -259,16 +242,22 @@ export class ByebugSession
     await this.byebugSubscription?.unsubscribe()
   }
 
+  protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
+    // runtime supports no threads so just return a default thread.
+    response.body = {
+      threads: [new Thread(ByebugSession.threadID, 'thread 1')]
+    }
+    this.sendResponse(response)
+  }
+
   protected async configurationDoneRequest(
     response: DebugProtocol.ConfigurationDoneResponse,
     args: DebugProtocol.ConfigurationDoneArguments
-  ) {
+  ): Promise<void> {
     super.configurationDoneRequest(response, args)
 
-    log('ConfigurationDoneRequest')
-
-    this.sendResponse(response)
-    log('ConfigurationDoneResponse', response)
+    // notify the attach request that the configuration has finished
+    this.waitForConfigurationDone.complete()
   }
 
   protected async setBreakPointsRequest(
@@ -277,18 +266,40 @@ export class ByebugSession
   ): Promise<void> {
     log('SetBreakPointsRequest')
 
-    // let vscodeBreakpoints: DebugProtocol.Breakpoint[]
-    // if there are no connections yet, we cannot verify any breakpoint
-    const vscodeBreakpoints = args.breakpoints!.map(breakpoint => ({
-      verified: false,
-      line: breakpoint.line
-    }))
+    try {
+      response.body = { breakpoints: [] }
 
-    vscodeBreakpoints.push()
+      // let vscodeBreakpoints: DebugProtocol.Breakpoint[]
+      // if there are no connections yet, we cannot verify any breakpoint
+      const vscodeBreakpoints = args.breakpoints?.map(breakpoint => ({
+        verified: true,
+        line: breakpoint.line
+      }))
 
-    response.body = { breakpoints: vscodeBreakpoints }
+      response.body = { breakpoints: vscodeBreakpoints || [] }
+
+      // // for all connections ...
+      // await Promise.all(
+      //   connections.map(async (connection, connectionIndex) => {
+      //     const promise = async () => {
+      //       // should clear all breakpoints
+      //     }
+      //   })
+      // )
+      response.body = { breakpoints: vscodeBreakpoints || [] }
+    } catch (error) {
+      this.sendErrorResponse(response, error)
+      return
+    }
 
     this.sendResponse(response)
+  }
+
+  protected restartRequest(
+    response: DebugProtocol.RestartResponse,
+    args: DebugProtocol.RestartArguments
+  ) {
+    this.client.super.restartRequest(response, args)
   }
 
   protected async stackTraceRequest(

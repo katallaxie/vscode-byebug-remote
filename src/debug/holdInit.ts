@@ -26,22 +26,22 @@ export class ByebugHoldInit implements Observer<Buffer> {
 
     this.session.sendEvent(new StoppedEvent('pause'))
 
-    this.session.sendEvent(
-      new BreakpointEvent(
-        'new',
-        new Breakpoint(
-          true,
-          59,
-          63,
-          new Source(
-            path.basename(
-              '/Users/sebastian/src/github/github/app/controllers/dashboard_controller.rb'
-            ),
-            '/Users/sebastian/src/github/github/app/controllers/dashboard_controller.rb'
-          )
-        )
-      )
-    )
+    // this.session.sendEvent(
+    //   new BreakpointEvent(
+    //     'new',
+    //     new Breakpoint(
+    //       true,
+    //       59,
+    //       63,
+    //       new Source(
+    //         path.basename(
+    //           '/Users/sebastian/src/github/github/app/controllers/dashboard_controller.rb'
+    //         ),
+    //         '/Users/sebastian/src/github/github/app/controllers/dashboard_controller.rb'
+    //       )
+    //     )
+    //   )
+    // )
   }
 
   error(err: Error) {
