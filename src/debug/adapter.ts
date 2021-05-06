@@ -17,6 +17,7 @@ import * as util from 'util'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { ByebugSubject } from './socket'
 import { ErrPortAttributeMissing, ErrLaunchRequestNotSupported } from './error'
 import { random, log } from './utils'
 import { filter, skip, take, tap } from 'rxjs/operators'
@@ -180,13 +181,15 @@ export class ByebugSession
     // here we need to find a path
     log('creating new byebug')
 
-    const client = ByebugClient.create({
+    const socket = new ByebugSubject<Buffer>({
       host: args.host,
-      port: args.port,
-      family: 6
+      port: args.port
     })
 
-    client.subscribe(this)
+    socket.subscribe(e => {
+      logger.log('here')
+      logger.log(e.toString())
+    })
 
     try {
       await this.waitingForConnect.toPromise()
@@ -295,12 +298,10 @@ export class ByebugSession
     this.sendResponse(response)
   }
 
-  protected restartRequest(
-    response: DebugProtocol.RestartResponse,
-    args: DebugProtocol.RestartArguments
-  ) {
-    this.client.super.restartRequest(response, args)
-  }
+  // protected restartRequest(
+  //   response: DebugProtocol.RestartResponse,
+  //   args: DebugProtocol.RestartArguments
+  // ) {}
 
   protected async stackTraceRequest(
     response: DebugProtocol.StackTraceResponse,
