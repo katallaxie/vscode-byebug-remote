@@ -30,7 +30,11 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
 
   private _socket: net.Socket | null = null
   private _chunks: Buffer[] = []
-  private _initial = true
+  private _dataSubscription: Subscription | null = null
+  private _closeSubscription: Subscription | null = null
+  private _errorSubscription: Subscription | null = null
+  private _readySubscription: Subscription | null = null
+  private _initial = false
 
   constructor(
     configOrSource: ByebugSubjectConfig<T> | Observable<T>,
@@ -118,7 +122,7 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
       }
     })
 
-    this._socket.addListener('ready', () => {
+    this._readySubscription = fromEvent(this._socket, 'ready').subscribe(() => {
       const queue = this.destination
 
       if (queue && queue instanceof ReplaySubject) {
@@ -128,14 +132,17 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
       }
     })
 
-    this._socket.addListener('error', (e: Error) => {
-      log(e)
-      this._resetState()
-      observer.error(e)
-    })
+    this._closeSubscription = fromEvent<Error>(this._socket, 'error').subscribe(
+      e => {
+        this._resetState()
+        observer.error(e)
+      }
+    )
 
-    this._socket.addListener('close', (hasError: boolean) => {
-      log('close')
+    this._closeSubscription = fromEvent<boolean>(
+      this._socket,
+      'close'
+    ).subscribe(hasError => {
       this._resetState()
 
       if (hasError) {
@@ -145,29 +152,20 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
       observer.complete()
     })
 
-    const dataSubscription = fromEvent<Buffer>(this._socket, 'data').subscribe(
+    this._dataSubscription = fromEvent<Buffer>(this._socket, 'data').subscribe(
       data => {
         this._chunks.push(data)
 
         if (data.indexOf('PROMPT') === 0) {
-          this.next(Buffer.from(Buffer.concat(this._chunks)))
+          observer.next(
+            Buffer.from(Buffer.concat(this._chunks)).toString() as any
+          )
 
-          this.initial = false
-          this.chunks = [] // reset buffer
+          this._initial = false
+          this._chunks = [] // reset buffer
         }
       }
     )
-
-    this._socket.addListener('data', (data: Buffer) => {
-      this._chunks.push(data)
-
-      if (data.indexOf('PROMPT') === 0) {
-        observer.next(Buffer.from(Buffer.concat(this.chunks)))
-
-        this._initial = false
-        this._chunks = [] // reset buffer
-      }
-    })
 
     try {
       this._socket.connect({
@@ -200,6 +198,22 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
         }
 
         this._resetState()
+      }
+
+      if (this._dataSubscription) {
+        this._dataSubscription.unsubscribe()
+      }
+
+      if (this._errorSubscription) {
+        this._errorSubscription.unsubscribe()
+      }
+
+      if (this._closeSubscription) {
+        this._closeSubscription.unsubscribe()
+      }
+
+      if (this._readySubscription) {
+        this._readySubscription.unsubscribe()
       }
     })
 

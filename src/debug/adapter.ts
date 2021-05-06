@@ -186,10 +186,14 @@ export class ByebugSession
       port: args.port
     })
 
-    socket.subscribe(e => {
-      logger.log('here')
-      logger.log(e.toString())
-    })
+    try {
+      socket.subscribe(e => {
+        logger.log('here')
+        logger.log(e.toString())
+      })
+    } catch (e) {
+      log(e)
+    }
 
     try {
       await this.waitingForConnect.toPromise()
