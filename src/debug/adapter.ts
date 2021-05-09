@@ -186,17 +186,14 @@ export class ByebugSession
       port: args.port
     })
 
-    try {
-      socket.subscribe(e => {
-        logger.log('here')
-        logger.log(e.toString())
-      })
-    } catch (e) {
-      log(e)
-    }
+    socket.subscribe(() => this.waitingForConnect.complete())
 
     try {
       await this.waitingForConnect.toPromise()
+      const result = await socket
+        .multiplex(() => 'info breakpoints')
+        .toPromise()
+      log(result)
     } catch (error) {
       this.sendErrorResponse(response, error)
 

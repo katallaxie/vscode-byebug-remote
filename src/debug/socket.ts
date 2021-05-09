@@ -9,8 +9,10 @@ import {
   Subscription,
   fromEvent
 } from 'rxjs'
+import * as rl from 'readline'
+import * as stream from 'stream'
 import * as net from 'net'
-import { random, log } from './utils'
+import { log } from './utils'
 
 export interface ByebugSubjectConfig<T> {
   host: string
@@ -45,10 +47,11 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
     if (configOrSource instanceof Observable) {
       this.destination = destination
       this.source = configOrSource as Observable<T>
-    } else {
-      this._config = { ...this._config, ...configOrSource }
-      this._output = new Subject<T>()
+      return
     }
+
+    this._config = { ...this._config, ...configOrSource }
+    this._output = new Subject<T>()
 
     this.destination = new ReplaySubject()
   }
@@ -64,32 +67,28 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
     return byebug
   }
 
-  private _resetState() {
-    this._socket = null
-
-    if (!this.source) {
-      this.destination = new ReplaySubject()
-    }
-
-    this._output = new Subject<T>()
-  }
-
   multiplex(cmd: () => any): Observable<T> {
     return new Observable((observer: Observer<T>) => {
       try {
         this.next(cmd())
-      } catch (err) {
-        observer.error(err)
+      } catch (e) {
+        observer.error(e)
       }
 
       const subscription = this.subscribe(
         x => {
+          log('incming')
+          log((<any>x).toString())
           try {
           } catch (err) {
+            log(err)
             observer.error(err)
           }
         },
-        err => observer.error(err),
+        err => () => {
+          log(err)
+          observer.error(err)
+        },
         () => observer.complete()
       )
 
@@ -102,28 +101,38 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
   private _connectSocket() {
     const observer = this._output
 
-    let socket: net.Socket | null
+    this._socket = new net.Socket({
+      writable: true,
+      readable: true
+    })
 
-    try {
-      socket = new net.Socket({
-        writable: true,
-        readable: true
-      })
-      this._socket = socket
-    } catch (e) {
-      observer.error(e)
-      return
-    }
-
+    // Subscription to govern replay subject
     const subscription = new Subscription(() => {
-      this._socket = null
-      if (socket) {
-        socket.destroy()
+      if (!this._socket?.destroyed) {
+        this._socket?.destroy
       }
+      this._socket = null
     })
 
     this._readySubscription = fromEvent(this._socket, 'ready').subscribe(() => {
-      const queue = this.destination
+      const queue = this.destination // replay subject
+
+      this.destination = Subscriber.create<T>(
+        x => {
+          log(x)
+          try {
+            this._socket?.write(`${x} breakpoints\n` as any)
+          } catch (e) {
+            this.destination?.error(e)
+          }
+        },
+        err => {
+          observer.error(err)
+        },
+        () => {
+          this._socket?.destroy()
+        }
+      ) as Subscriber<any>
 
       if (queue && queue instanceof ReplaySubject) {
         subscription.add(
@@ -132,7 +141,7 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
       }
     })
 
-    this._closeSubscription = fromEvent<Error>(this._socket, 'error').subscribe(
+    this._errorSubscription = fromEvent<Error>(this._socket, 'error').subscribe(
       e => {
         this._resetState()
         observer.error(e)
@@ -153,16 +162,25 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
     })
 
     this._dataSubscription = fromEvent<Buffer>(this._socket, 'data').subscribe(
-      data => {
+      async data => {
         this._chunks.push(data)
 
-        if (data.indexOf('PROMPT') === 0) {
-          observer.next(
-            Buffer.from(Buffer.concat(this._chunks)).toString() as any
-          )
+        const s = new stream.PassThrough()
+        s.end(data)
 
-          this._initial = false
-          this._chunks = [] // reset buffer
+        const l = rl.createInterface({ input: s })
+
+        for await (const line of l) {
+          if (line.indexOf('PROMPT') === 0) {
+            observer.next(
+              Buffer.from(Buffer.concat(this._chunks)).toString() as any
+            )
+
+            this._initial = false
+            this._chunks = [] // reset buffer
+
+            break
+          }
         }
       }
     )
@@ -227,5 +245,15 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
     }
     this._resetState()
     super.unsubscribe()
+  }
+
+  private _resetState() {
+    this._socket = null
+
+    if (!this.source) {
+      this.destination = new ReplaySubject()
+    }
+
+    this._output = new Subject<T>()
   }
 }
