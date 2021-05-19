@@ -18,7 +18,11 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { ByebugSubject } from './socket'
-import { ErrPortAttributeMissing, ErrLaunchRequestNotSupported } from './error'
+import {
+  ErrPortAttributeMissing,
+  ErrLaunchRequestNotSupported,
+  ErrNoSocketAvailable
+} from './error'
 import { random, log } from './utils'
 import { filter, skip, take, tap } from 'rxjs/operators'
 import { EventType } from './connection'
@@ -51,9 +55,7 @@ export interface AttachRequestArguments
   cwd?: string
 }
 
-export class ByebugSession
-  extends LoggingDebugSession
-  implements Observer<ByebugConnectionEvent> {
+export class ByebugSession extends LoggingDebugSession {
   private logLevel: Logger.LogLevel = Logger.LogLevel.Error
 
   // we don't support multiple threads, so we can use a hardcoded ID for the default thread
@@ -61,7 +63,8 @@ export class ByebugSession
 
   private waitingConnections = new Set<ByebugConnection>()
   private waitingForInit = new Subject()
-  private waitingForConnect = new Subject<ByebugConnection>()
+  private waitingForConnect = new Subject()
+  private socket: ByebugSubject<Buffer> | null = null
   private byebugSubscription: Subscription | null = null
   private waitForConfigurationDone = new Subject()
 
@@ -98,48 +101,17 @@ export class ByebugSession
     this.sendEvent(new InitializedEvent())
   }
 
-  async next(event: ByebugConnectionEvent) {
-    if (event instanceof ByebugCreated) {
-      log('Sending OutputEvent as byebug is created')
-
-      this.sendEvent(new OutputEvent(`new connection`))
-    }
-
-    if (event instanceof ByebugConnected) {
-      this.waitingForConnect.next(event)
-      this.waitingForConnect.complete()
-    }
-
-    if (event instanceof ByebugReceived) {
-      this.sendEvent(new OutputEvent(event.buffer.toString()))
-
-      if (event.initial) {
-        log('Sending Initial Prompt')
-
-        this.waitingForInit.next(event)
-        this.waitingForInit.complete()
-
-        // this.sendEvent(new StoppedEvent('entry'))
-
-        return
-      }
-    }
-  }
-
-  error(err: Error) {
-    log(`Sending TerminatedEvent as byebug is disconnected ${err}`)
-    this.sendEvent(new TerminatedEvent())
-  }
-
-  complete() {
-    this.sendEvent(new TerminatedEvent())
-  }
-
   protected launchRequest(response: DebugProtocol.LaunchResponse): void {
     this.sendErrorResponse(response, 3000, ErrLaunchRequestNotSupported)
     this.shutdown()
   }
 
+  /**
+   * Request to attach to the debugger
+   *
+   * @param response
+   * @param args
+   */
   protected attachRequest(
     response: DebugProtocol.AttachResponse,
     args: AttachRequestArguments
@@ -153,6 +125,13 @@ export class ByebugSession
     this.initLaunchAttachRequest(response, args)
   }
 
+  /**
+   * Initialize the attach request
+   *
+   * @param response
+   * @param args
+   * @returns
+   */
   private async initLaunchAttachRequest(
     response: DebugProtocol.LaunchResponse,
     args: AttachRequestArguments
@@ -176,29 +155,27 @@ export class ByebugSession
 
     const localPath = args.cwd || '' // should this be the default workfolder?
 
-    await this.waitForConfigurationDone.toPromise()
+    // await this.waitForConfigurationDone.toPromise()
 
     // here we need to find a path
     log('creating new byebug')
 
-    const socket = new ByebugSubject<Buffer>({
+    this.socket = new ByebugSubject<Buffer>({
       host: args.host,
       port: args.port
     })
 
-    socket.subscribe(() => this.waitingForConnect.complete())
+    // socket.subscribe(() => this.waitingForConnect.complete())
+    this.socket.pipe(take(1)).subscribe(this.waitingForConnect)
 
     try {
-      await this.waitingForConnect.toPromise()
-      const result = await socket
-        .multiplex(() => 'info breakpoints')
-        .toPromise()
-      log(result)
+      const result = await this.waitingForConnect.toPromise()
     } catch (error) {
       this.sendErrorResponse(response, error)
-
       return
     }
+
+    this.sendEvent(new StoppedEvent('breakpoint', 1))
 
     log('AttachedResponse')
 
@@ -299,10 +276,22 @@ export class ByebugSession
     this.sendResponse(response)
   }
 
-  // protected restartRequest(
-  //   response: DebugProtocol.RestartResponse,
-  //   args: DebugProtocol.RestartArguments
-  // ) {}
+  protected async restartRequest(
+    response: DebugProtocol.RestartResponse,
+    args: DebugProtocol.RestartArguments
+  ): Promise<void> {
+    if (this.socket === null) {
+      this.sendErrorResponse(response, 3000, ErrNoSocketAvailable)
+    }
+
+    try {
+      const result = await this.socket?.multiplex(() => 'restart').toPromise()
+    } catch (error) {
+      this.sendErrorResponse(response, error)
+    }
+
+    this.sendResponse(response)
+  }
 
   protected async stackTraceRequest(
     response: DebugProtocol.StackTraceResponse,
@@ -329,6 +318,22 @@ export class ByebugSession
     log('StepOutRequest')
 
     log('StepOutResponse')
+  }
+
+  protected async continueRequest(
+    response: DebugProtocol.ContinueResponse
+  ): Promise<void> {
+    log('ContinueRequest')
+
+    try {
+      await this.socket?.continue().toPromise()
+    } catch (error) {
+      this.sendErrorResponse(response, error)
+    }
+
+    log('ContinueResponse')
+
+    this.sendResponse(response)
   }
 }
 

@@ -77,16 +77,12 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
 
       const subscription = this.subscribe(
         x => {
-          log('incming')
-          log((<any>x).toString())
           try {
           } catch (err) {
-            log(err)
             observer.error(err)
           }
         },
         err => () => {
-          log(err)
           observer.error(err)
         },
         () => observer.complete()
@@ -96,6 +92,10 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
         subscription.unsubscribe()
       }
     })
+  }
+
+  continue(): Observable<T> {
+    return this.multiplex(() => 'continue')
   }
 
   private _connectSocket() {
@@ -119,9 +119,8 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
 
       this.destination = Subscriber.create<T>(
         x => {
-          log(x)
           try {
-            this._socket?.write(`${x} breakpoints\n` as any)
+            this._socket?.write(`${x}\n` as any)
           } catch (e) {
             this.destination?.error(e)
           }
