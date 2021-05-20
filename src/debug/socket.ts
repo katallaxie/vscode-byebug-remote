@@ -25,10 +25,14 @@ const DEFAULT_BYEBUG_CONFIG: ByebugSubjectConfig<any> = {
 }
 
 export type ByebugMessage = string | Buffer
+export interface CommandArguments {
+  completed?: Observer<true>
+}
 
 export class ByebugSubject<T> extends AnonymousSubject<T> {
   _config: ByebugSubjectConfig<T> = DEFAULT_BYEBUG_CONFIG
   _output: Subject<T> = new Subject<T>()
+  _sendComplete: Subject<true> = new Subject<true>()
 
   private _socket: net.Socket | null = null
   private _chunks: Buffer[] = []
@@ -36,7 +40,6 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
   private _closeSubscription: Subscription | null = null
   private _errorSubscription: Subscription | null = null
   private _readySubscription: Subscription | null = null
-  private _initial = false
 
   constructor(
     configOrSource: ByebugSubjectConfig<T> | Observable<T>,
@@ -67,7 +70,7 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
     return byebug
   }
 
-  multiplex(cmd: () => any): Observable<T> {
+  multiplex(cmd: () => any, args: CommandArguments): Observable<T> {
     return new Observable((observer: Observer<T>) => {
       try {
         this.next(cmd())
@@ -78,6 +81,7 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
       const subscription = this.subscribe(
         x => {
           try {
+            observer.next(x)
           } catch (err) {
             observer.error(err)
           }
@@ -85,7 +89,9 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
         err => () => {
           observer.error(err)
         },
-        () => observer.complete()
+        () => {
+          observer.complete()
+        }
       )
 
       return () => {
@@ -95,7 +101,20 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
   }
 
   continue(): Observable<T> {
-    return this.multiplex(() => 'continue')
+    return this.multiplex(() => 'continue', {})
+  }
+
+  backtrace(): Observable<T> {
+    return this.multiplex(() => 'backtrace', {})
+  }
+
+  stepIn(): Observable<T> {
+    return this.multiplex(() => 'step', {})
+  }
+
+  setBreakpoint(file: string, line: number): Observable<T> {
+    log(`break ${file}:${line}`)
+    return this.multiplex(() => `break ${file}:${line}`, {})
   }
 
   private _connectSocket() {
@@ -165,17 +184,14 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
         this._chunks.push(data)
 
         const s = new stream.PassThrough()
-        s.end(data)
+        s.end(data.toString())
 
         const l = rl.createInterface({ input: s })
 
         for await (const line of l) {
           if (line.indexOf('PROMPT') === 0) {
-            observer.next(
-              Buffer.from(Buffer.concat(this._chunks)).toString() as any
-            )
+            observer.next(Buffer.from(Buffer.concat(this._chunks)) as any)
 
-            this._initial = false
             this._chunks = [] // reset buffer
 
             break
@@ -209,29 +225,30 @@ export class ByebugSubject<T> extends AnonymousSubject<T> {
     subscriber.add(() => {
       const { _socket } = this
 
-      if (this._output.observers.length === 0) {
-        if (_socket) {
-          _socket.destroy()
-        }
+      // if (this._output.observers.length === 0) {
+      //   if (_socket) {
+      //     _socket.destroy()
+      //   }
 
-        this._resetState()
-      }
+      //   this._resetState()
+      // }
 
-      if (this._dataSubscription) {
-        this._dataSubscription.unsubscribe()
-      }
+      // if (this._dataSubscription) {
+      //   log('unsubscribe')
+      //   this._dataSubscription.unsubscribe()
+      // }
 
-      if (this._errorSubscription) {
-        this._errorSubscription.unsubscribe()
-      }
+      // if (this._errorSubscription) {
+      //   this._errorSubscription.unsubscribe()
+      // }
 
-      if (this._closeSubscription) {
-        this._closeSubscription.unsubscribe()
-      }
+      // if (this._closeSubscription) {
+      //   this._closeSubscription.unsubscribe()
+      // }
 
-      if (this._readySubscription) {
-        this._readySubscription.unsubscribe()
-      }
+      // if (this._readySubscription) {
+      //   this._readySubscription.unsubscribe()
+      // }
     })
 
     return subscriber

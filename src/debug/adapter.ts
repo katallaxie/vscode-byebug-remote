@@ -11,12 +11,15 @@ import {
   BreakpointEvent,
   Breakpoint,
   Source,
-  Thread
+  Thread,
+  StackFrame
 } from 'vscode-debugadapter'
 import * as util from 'util'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import * as rl from 'readline'
+import * as stream from 'stream'
 import { ByebugSubject } from './socket'
 import {
   ErrPortAttributeMissing,
@@ -24,9 +27,19 @@ import {
   ErrNoSocketAvailable
 } from './error'
 import { random, log } from './utils'
-import { filter, skip, take, tap } from 'rxjs/operators'
+import { filter, repeat, skip, take, tap } from 'rxjs/operators'
 import { EventType } from './connection'
-import { from, Observable, of, Observer, Subscription, Subject } from 'rxjs'
+import {
+  from,
+  Observable,
+  of,
+  Observer,
+  Subscription,
+  Subject,
+  BehaviorSubject,
+  ReplaySubject,
+  pipe
+} from 'rxjs'
 import { ByebugConnected, ByebugReceived } from './events'
 import * as net from 'net'
 import { fromPrompt } from './prompt'
@@ -64,6 +77,7 @@ export class ByebugSession extends LoggingDebugSession {
   private waitingConnections = new Set<ByebugConnection>()
   private waitingForInit = new Subject()
   private waitingForConnect = new Subject()
+  private controlSubject = new ReplaySubject<Buffer>()
   private socket: ByebugSubject<Buffer> | null = null
   private byebugSubscription: Subscription | null = null
   private waitForConfigurationDone = new Subject()
@@ -87,6 +101,7 @@ export class ByebugSession extends LoggingDebugSession {
     log('InitializeRequest')
 
     response.body = {
+      supportsStepBack: false,
       supportsConfigurationDoneRequest: true,
       supportsEvaluateForHovers: false,
       supportsConditionalBreakpoints: false,
@@ -164,12 +179,11 @@ export class ByebugSession extends LoggingDebugSession {
       host: args.host,
       port: args.port
     })
-
-    // socket.subscribe(() => this.waitingForConnect.complete())
-    this.socket.pipe(take(1)).subscribe(this.waitingForConnect)
+    this.socket.subscribe(this.waitingForConnect)
 
     try {
-      const result = await this.waitingForConnect.toPromise()
+      const result = await this.waitingForConnect.pipe(take(1)).toPromise()
+      log(result)
     } catch (error) {
       this.sendErrorResponse(response, error)
       return
@@ -247,31 +261,32 @@ export class ByebugSession extends LoggingDebugSession {
   ): Promise<void> {
     log('SetBreakPointsRequest')
 
-    try {
-      response.body = { breakpoints: [] }
+    response.body = { breakpoints: [] }
 
-      // let vscodeBreakpoints: DebugProtocol.Breakpoint[]
-      // if there are no connections yet, we cannot verify any breakpoint
-      const vscodeBreakpoints = args.breakpoints?.map(breakpoint => ({
-        verified: true,
-        line: breakpoint.line
-      }))
+    let vscodeBreakpoints
+    if (args.breakpoints) {
+      vscodeBreakpoints = await Promise.all(
+        args.breakpoints?.map(async breakpoint => {
+          try {
+            log(args)
+            log(breakpoint)
 
-      response.body = { breakpoints: vscodeBreakpoints || [] }
+            await this.socket
+              ?.setBreakpoint(args.source.name || '', breakpoint.line)
+              .pipe(take(1))
+              .toPromise()
 
-      // // for all connections ...
-      // await Promise.all(
-      //   connections.map(async (connection, connectionIndex) => {
-      //     const promise = async () => {
-      //       // should clear all breakpoints
-      //     }
-      //   })
-      // )
-      response.body = { breakpoints: vscodeBreakpoints || [] }
-    } catch (error) {
-      this.sendErrorResponse(response, error)
-      return
+            return { verified: true, line: breakpoint.line }
+          } catch (error) {
+            this.sendErrorResponse(response, error)
+          }
+
+          return { verified: false, line: breakpoint.line }
+        })
+      )
     }
+
+    response.body.breakpoints = vscodeBreakpoints || []
 
     this.sendResponse(response)
   }
@@ -285,7 +300,7 @@ export class ByebugSession extends LoggingDebugSession {
     }
 
     try {
-      const result = await this.socket?.multiplex(() => 'restart').toPromise()
+      await this.socket?.multiplex(() => 'restart', {}).toPromise()
     } catch (error) {
       this.sendErrorResponse(response, error)
     }
@@ -296,9 +311,36 @@ export class ByebugSession extends LoggingDebugSession {
   protected async stackTraceRequest(
     response: DebugProtocol.StackTraceResponse,
     args: DebugProtocol.StackTraceArguments
-  ) {
+  ): Promise<void> {
     log('StackTraceRequest')
 
+    const threadId = args.threadId
+    const stackFrames: StackFrame[] = []
+
+    try {
+      const backtrace = await this.socket?.backtrace().pipe(take(1)).toPromise()
+
+      const s = new stream.PassThrough()
+      s.end(backtrace)
+
+      const l = rl.createInterface({ input: s })
+
+      for await (const line of l) {
+        const regex = /^#(\d+)\s+(.*)at\s+(.*?)[:](\d+)/g
+        const [_, num, sig, file, pos] =
+          regex.exec(line.replace('-->', '').trim()) || []
+
+        stackFrames.push(
+          new StackFrame(Number(num), sig, new Source(file), Number(pos))
+        )
+      }
+    } catch (error) {
+      this.sendErrorResponse(response, error)
+    }
+
+    response.body = { stackFrames, totalFrames: stackFrames.length }
+
+    log('StackTraceResponse')
     this.sendResponse(response)
   }
 
@@ -308,16 +350,19 @@ export class ByebugSession extends LoggingDebugSession {
     log('NextResponse')
   }
 
-  protected stepInRequest(response: DebugProtocol.StepInResponse): void {
+  protected async stepInRequest(
+    response: DebugProtocol.StepInResponse
+  ): Promise<void> {
     log('StepInRequest')
 
+    try {
+      await this.socket?.stepIn().pipe(take(1)).toPromise()
+      this.sendEvent(new StoppedEvent('step', 1))
+    } catch (error) {
+      this.sendErrorResponse(response, error)
+    }
+
     log('StepInResponse')
-  }
-
-  protected stepOutRequest(response: DebugProtocol.StepOutResponse): void {
-    log('StepOutRequest')
-
-    log('StepOutResponse')
   }
 
   protected async continueRequest(
@@ -326,7 +371,8 @@ export class ByebugSession extends LoggingDebugSession {
     log('ContinueRequest')
 
     try {
-      await this.socket?.continue().toPromise()
+      await this.socket?.continue().pipe(take(1)).toPromise()
+      this.sendEvent(new StoppedEvent('breakpoint', 1))
     } catch (error) {
       this.sendErrorResponse(response, error)
     }
