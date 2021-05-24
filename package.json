@@ -159,6 +159,7 @@
     "rxjs": "^6.6.7",
     "vscode-debugadapter": "^1.46.0",
     "vscode-debugadapter-testsupport": "^1.46.0",
-    "vscode-debugprotocol": "^1.46.0"
+    "vscode-debugprotocol": "^1.46.0",
+    "xstate": "^4.19.1"
   }
 }
