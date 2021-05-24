@@ -331,6 +331,7 @@ export class ByebugSession extends LoggingDebugSession {
   ): Promise<void> {
     log('StackTraceRequest')
 
+    // artici
     const threadId = args.threadId
     const stackFrames: StackFrame[] = []
 
@@ -361,6 +362,35 @@ export class ByebugSession extends LoggingDebugSession {
     response.body = { stackFrames, totalFrames: stackFrames.length }
 
     log('StackTraceResponse')
+    this.sendResponse(response)
+  }
+
+  protected async scopesRequest(
+    response: DebugProtocol.ScopesResponse,
+    args: DebugProtocol.ScopesArguments
+  ): Promise<void> {
+    log('ScopesRequest')
+
+    const variables: DebugProtocol.Variable[] = []
+    try {
+      const args = await this.variables()
+      log(args?.toString())
+    } catch (e) {
+      this.sendErrorResponse(response, e)
+    }
+
+    log('ScopesResponse')
+    this.sendResponse(response)
+  }
+
+  protected variablesRequest(
+    response: DebugProtocol.VariablesResponse,
+    args: DebugProtocol.VariablesArguments,
+    request?: DebugProtocol.Request
+  ): void {
+    log('VariablesRequest')
+
+    log('VariablesResponse')
     this.sendResponse(response)
   }
 
@@ -418,9 +448,8 @@ export class ByebugSession extends LoggingDebugSession {
     this.sendResponse(response)
   }
 
-  private receiveOutput(data: Buffer) {
-    log(data)
-    this.sendEvent(new OutputEvent(data + '', 'data'))
+  private async variables() {
+    return await this.connection?.vars().pipe(take(1)).toPromise()
   }
 }
 

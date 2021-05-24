@@ -17,6 +17,7 @@ export type ByebugCommandContinue = { type: 'continue'; args: string[] }
 export type ByebugCommandRestart = { type: 'restart'; args: string[] }
 export type ByebugCommandStep = { type: 'step'; args: string[] }
 export type ByebugCommandBreakpoint = { type: 'break'; args: string[] }
+export type ByebugCommandVariables = { type: 'var'; args: ['local'] }
 
 export type ByebugCommand =
   | ByebugCommandBacktrace
@@ -24,6 +25,7 @@ export type ByebugCommand =
   | ByebugCommandRestart
   | ByebugCommandStep
   | ByebugCommandBreakpoint
+  | ByebugCommandVariables
 
 // export class Connection extends Client {}
 export class Connection {
@@ -129,6 +131,14 @@ export class Connection {
    */
   restart(): Observable<Buffer> {
     return this.send({ type: 'restart', args: [] })
+  }
+
+  /**
+   *
+   * @returns
+   */
+  vars(): Observable<Buffer> {
+    return this.send({ type: 'var', args: ['local'] })
   }
 
   /**
