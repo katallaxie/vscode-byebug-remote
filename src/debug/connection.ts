@@ -64,11 +64,11 @@ export class Connection {
    */
   send(cmd: ByebugCommand): Observable<Buffer> {
     return new Observable((observer: Observer<Buffer>) => {
-      const chunks: Buffer[] = []
+      //const chunks: Buffer[] = []
 
       const subscription = fromEvent<Buffer>(this._socket, 'data').subscribe(
         async data => {
-          chunks.push(data)
+          log(data.toString())
 
           const s = new stream.PassThrough()
           s.end(data.toString())
@@ -76,8 +76,8 @@ export class Connection {
           const l = rl.createInterface({ input: s })
 
           for await (const line of l) {
-            if (line.indexOf('PROMPT') === 0) {
-              observer.next(Buffer.from(Buffer.concat(chunks)))
+            if (line.indexOf('PROMPT') !== 0) {
+              observer.next(Buffer.from(line))
               observer.complete()
               break
             }

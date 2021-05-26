@@ -341,21 +341,23 @@ export class ByebugSession extends LoggingDebugSession {
         .pipe(take(1))
         .toPromise()
 
-      const s = new stream.PassThrough()
-      s.end(backtrace)
+      const line = backtrace!.toString('utf8').trim()
+      const json = JSON.parse(line)
 
-      const l = rl.createInterface({ input: s })
-
-      for await (const line of l) {
-        const regex = /^#(\d+)\s+(.*)at\s+(.*?)[:](\d+)/g
-        const [_, num, sig, file, pos] =
-          regex.exec(line.replace('-->', '').trim()) || []
-
+      json['values'].forEach((line: any) => {
         stackFrames.push(
-          new StackFrame(Number(num), sig, new Source(file), Number(pos))
+          new StackFrame(
+            Number(line['pos']),
+            line['call'],
+            new Source(line['file']),
+            Number(line['line'])
+          )
         )
-      }
+      })
     } catch (error) {
+      if (error instanceof SyntaxError) {
+        log('syntax', error.message, error.name)
+      }
       this.sendErrorResponse(response, error)
     }
 
