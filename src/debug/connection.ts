@@ -1,8 +1,6 @@
 import {
   Observable,
   Observer,
-  ReplaySubject,
-  Subject,
   Subscription,
   fromEvent,
   BehaviorSubject
@@ -27,12 +25,29 @@ export type ByebugCommand =
   | ByebugCommandBreakpoint
   | ByebugCommandVariables
 
-// export class Connection extends Client {}
+export interface ByebugResponseBacktrace {
+  mark: string
+  pos: string
+  call: string
+  file: string
+  line: number
+  full_path: string
+}
+
+export interface ByebugResponseSetBreakpoint {
+  line: string
+}
+
+export type ByebugResponseContinue = void
+export type ByebugResponsePath = 'frame.line' | 'variable.variable'
+
+export interface ByebugResponse<T> {
+  path: ByebugResponsePath
+  values: T
+}
+
 export class Connection {
-  private _output: Subject<Buffer> = new Subject<Buffer>()
   private _socket: net.Socket
-  private _chunks: Buffer[] = []
-  private _destination = new ReplaySubject<ByebugCommand>()
   private _config = { host: '127.0.0.0', port: 123456 }
   private _connected$ = new BehaviorSubject<boolean>(false)
 
@@ -62,25 +77,27 @@ export class Connection {
    * @param cmd
    * @returns
    */
-  send(cmd: ByebugCommand): Observable<Buffer> {
-    return new Observable((observer: Observer<Buffer>) => {
-      //const chunks: Buffer[] = []
-
+  send<T>(cmd: ByebugCommand): Observable<T> {
+    return new Observable((observer: Observer<T>) => {
       const subscription = fromEvent<Buffer>(this._socket, 'data').subscribe(
         async data => {
           log(data.toString())
 
           const s = new stream.PassThrough()
-          s.end(data.toString())
+          s.end(data.toString('utf-8').trim())
 
           const l = rl.createInterface({ input: s })
 
-          for await (const line of l) {
-            if (line.indexOf('PROMPT') !== 0) {
-              observer.next(Buffer.from(line))
-              observer.complete()
-              break
+          try {
+            for await (const line of l) {
+              if (line.indexOf('PROMPT') !== 0) {
+                observer.next(JSON.parse(line))
+                observer.complete()
+                break
+              }
             }
+          } catch (error) {
+            observer.error(error)
           }
         }
       )
@@ -102,7 +119,7 @@ export class Connection {
    *
    * @returns
    */
-  continue(): Observable<Buffer> {
+  continue(): Observable<void> {
     return this.send({ type: 'continue', args: [] })
   }
 
@@ -111,7 +128,7 @@ export class Connection {
    *
    * @returns
    */
-  backtrace(): Observable<Buffer> {
+  backtrace(): Observable<ByebugResponse<ByebugResponseBacktrace[]>> {
     return this.send({ type: 'backtrace', args: [] })
   }
 
@@ -120,7 +137,7 @@ export class Connection {
    *
    * @returns
    */
-  stepIn(): Observable<Buffer> {
+  stepIn(): Observable<ByebugResponse<ByebugResponseBacktrace>> {
     return this.send({ type: 'step', args: [] })
   }
 
@@ -129,7 +146,7 @@ export class Connection {
    *
    * @returns
    */
-  restart(): Observable<Buffer> {
+  restart(): Observable<void> {
     return this.send({ type: 'restart', args: [] })
   }
 
@@ -137,9 +154,9 @@ export class Connection {
    *
    * @returns
    */
-  vars(): Observable<Buffer> {
-    return this.send({ type: 'var', args: ['local'] })
-  }
+  // vars(): Observable<Buffer> {
+  //   return this.send({ type: 'var', args: ['local'] })
+  // }
 
   /**
    * Set a breakpoint
@@ -148,7 +165,10 @@ export class Connection {
    * @param line
    * @returns
    */
-  setBreakpoint(file: string, line: string): Observable<Buffer> {
+  setBreakpoint(
+    file: string,
+    line: string
+  ): Observable<ByebugResponseSetBreakpoint> {
     return this.send({ type: 'break', args: [[file, ':', line].join('')] })
   }
 
@@ -180,7 +200,6 @@ export class Connection {
 
           for await (const line of l) {
             if (line.indexOf('PROMPT') === 0) {
-              log('have seen prompt')
               observer.complete()
 
               break

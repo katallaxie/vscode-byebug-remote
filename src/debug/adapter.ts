@@ -8,24 +8,17 @@ import {
   StoppedEvent,
   Source,
   Thread,
-  StackFrame,
-  OutputEvent
+  StackFrame
 } from 'vscode-debugadapter'
 import { Connection } from './connection'
 import * as util from 'util'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import * as rl from 'readline'
-import * as stream from 'stream'
-import {
-  ErrPortAttributeMissing,
-  ErrLaunchRequestNotSupported,
-  ErrNoSocketAvailable
-} from './error'
+import { ErrPortAttributeMissing, ErrLaunchRequestNotSupported } from './error'
 import { random, log } from './utils'
 import { take } from 'rxjs/operators'
-import { Subscription, Subject, BehaviorSubject } from 'rxjs'
+import { Subject, BehaviorSubject } from 'rxjs'
 import { interpret, Interpreter } from 'xstate'
 import machine, {
   DebuggerMachineContext,
@@ -341,16 +334,13 @@ export class ByebugSession extends LoggingDebugSession {
         .pipe(take(1))
         .toPromise()
 
-      const line = backtrace!.toString('utf8').trim()
-      const json = JSON.parse(line)
-
-      json['values'].forEach((line: any) => {
+      backtrace?.values.forEach(trace => {
         stackFrames.push(
           new StackFrame(
-            Number(line['pos']),
-            line['call'],
-            new Source(line['file']),
-            Number(line['line'])
+            Number(trace.pos),
+            trace.call,
+            new Source(trace.file),
+            Number(trace.line)
           )
         )
       })
@@ -373,13 +363,13 @@ export class ByebugSession extends LoggingDebugSession {
   ): Promise<void> {
     log('ScopesRequest')
 
-    const variables: DebugProtocol.Variable[] = []
-    try {
-      const args = await this.variables()
-      log(args?.toString())
-    } catch (e) {
-      this.sendErrorResponse(response, e)
-    }
+    // const variables: DebugProtocol.Variable[] = []
+    // try {
+    //   const args = await this.variables()
+    //   log(args?.toString())
+    // } catch (e) {
+    //   this.sendErrorResponse(response, e)
+    // }
 
     log('ScopesResponse')
     this.sendResponse(response)
@@ -450,9 +440,9 @@ export class ByebugSession extends LoggingDebugSession {
     this.sendResponse(response)
   }
 
-  private async variables() {
-    return await this.connection?.vars().pipe(take(1)).toPromise()
-  }
+  // private async variables() {
+  //   return await this.connection?.vars().pipe(take(1)).toPromise()
+  // }
 }
 
 DebugSession.run(ByebugSession)
