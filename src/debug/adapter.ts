@@ -8,7 +8,10 @@ import {
   StoppedEvent,
   Source,
   Thread,
-  StackFrame
+  Handles,
+  StackFrame,
+  Variable,
+  Scope
 } from 'vscode-debugadapter'
 import { Connection } from './connection'
 import * as util from 'util'
@@ -56,6 +59,7 @@ export class ByebugSession extends LoggingDebugSession {
     DebuggerMachineEvent
   >
   private waitForConfigurationDone = new Subject()
+  private variableHandles = new Handles<string>()
 
   public constructor() {
     super()
@@ -363,24 +367,47 @@ export class ByebugSession extends LoggingDebugSession {
   ): Promise<void> {
     log('ScopesRequest')
 
-    // const variables: DebugProtocol.Variable[] = []
-    // try {
-    //   const args = await this.variables()
-    //   log(args?.toString())
-    // } catch (e) {
-    //   this.sendErrorResponse(response, e)
-    // }
+    response.body = {
+      scopes: [
+        new Scope('Local', this.variableHandles.create('local'), false),
+        new Scope('Global', this.variableHandles.create('global'), true)
+      ]
+    }
 
     log('ScopesResponse')
     this.sendResponse(response)
   }
 
-  protected variablesRequest(
+  protected async variablesRequest(
     response: DebugProtocol.VariablesResponse,
-    args: DebugProtocol.VariablesArguments,
-    request?: DebugProtocol.Request
-  ): void {
+    args: DebugProtocol.VariablesArguments
+  ): Promise<void> {
     log('VariablesRequest')
+
+    const id = this.variableHandles.get(args.variablesReference)
+    const variables: DebugProtocol.Variable[] = []
+    try {
+      const vars = (await this.connection
+        ?.vars()
+        .pipe(take(1))
+        .toPromise()) as any
+      const vv = vars['values'] as any[]
+
+      vv.forEach(v => {
+        variables.push({
+          name: `${id}_${v['key']}`,
+          value: v['value'],
+          variablesReference: 0
+        })
+      })
+    } catch (e) {
+      log(e)
+      this.sendErrorResponse(response, e)
+    }
+
+    response.body = {
+      variables: variables
+    }
 
     log('VariablesResponse')
     this.sendResponse(response)
@@ -425,8 +452,6 @@ export class ByebugSession extends LoggingDebugSession {
 
     const { state } = this.machine
     const hasBreakpoints = state.context.breakpoints.length > 0
-
-    log(hasBreakpoints)
 
     try {
       await this.connection?.continue().pipe(take(1)).toPromise()
